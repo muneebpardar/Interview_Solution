@@ -6,7 +6,6 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
   ActivityIndicator,
   Alert,
   Switch,
@@ -14,6 +13,7 @@ import {
   Platform,
   RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
 import * as Location from 'expo-location';
 import { outboxRepo } from '../storage/outboxRepo';

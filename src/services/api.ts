@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import { ReportPayload, ServerDebugCount } from '../types/report';
 
 export type SubmitResult =
@@ -9,14 +9,31 @@ export type SubmitResult =
   | { kind: 'fatal_error'; status: number; message: string }
   | { kind: 'network_error'; message: string };
 
-// Default baseUrl depending on platform:
-// Android Emulator uses 10.0.2.2 to reach host machine localhost:4000.
-// iOS Simulator / Web / Dev uses localhost:4000.
-export const DEFAULT_SERVER_URL =
-  Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://localhost:4000';
+/**
+ * Automatically infers the development machine's IP address from Metro scriptURL.
+ * This ensures that physical devices running Expo Go over Wi-Fi connect seamlessly
+ * to the mock server running on port 4000 without requiring manual IP entry.
+ */
+export function getDefaultServerUrl(): string {
+  try {
+    const scriptURL = (NativeModules as any)?.SourceCode?.scriptURL;
+    if (typeof scriptURL === 'string') {
+      const match = scriptURL.match(/https?:\/\/([^/:]+)/);
+      const host = match ? match[1] : null;
+      if (host && host !== 'localhost' && host !== '127.0.0.1') {
+        return `http://${host}:4000`;
+      }
+    }
+  } catch {}
+
+  // Fallback: Android Emulator uses 10.0.2.2; iOS / Web uses localhost.
+  return Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://localhost:4000';
+}
+
+export const DEFAULT_SERVER_URL = getDefaultServerUrl();
 
 class ApiClient {
-  private baseUrl: string = DEFAULT_SERVER_URL;
+  private baseUrl: string = getDefaultServerUrl();
 
   setBaseUrl(url: string) {
     this.baseUrl = url.replace(/\/+$/, '');
