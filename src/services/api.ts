@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { NativeModules, Platform } from 'react-native';
 import { ReportPayload, ServerDebugCount } from '../types/report';
 
@@ -10,12 +11,26 @@ export type SubmitResult =
   | { kind: 'network_error'; message: string };
 
 /**
- * Automatically infers the development machine's IP address from Metro scriptURL.
- * This ensures that physical devices running Expo Go over Wi-Fi connect seamlessly
- * to the mock server running on port 4000 without requiring manual IP entry.
+ * Dynamically resolves the mock server URL.
+ * On physical devices running Expo Go, it automatically extracts the development machine's
+ * local Wi-Fi IP (e.g. 192.168.1.36) from Expo Constants / Metro bundler URI.
  */
 export function getDefaultServerUrl(): string {
   try {
+    // 1. Try Expo Constants hostUri (e.g. "192.168.1.36:8081")
+    const hostUri =
+      Constants.expoConfig?.hostUri ||
+      (Constants as any)?.manifest2?.extra?.expoGo?.debuggerHost ||
+      (Constants as any)?.manifest?.debuggerHost;
+
+    if (typeof hostUri === 'string' && hostUri.includes(':')) {
+      const host = hostUri.split(':')[0];
+      if (host && host !== 'localhost' && host !== '127.0.0.1') {
+        return `http://${host}:4000`;
+      }
+    }
+
+    // 2. Try NativeModules SourceCode scriptURL
     const scriptURL = (NativeModules as any)?.SourceCode?.scriptURL;
     if (typeof scriptURL === 'string') {
       const match = scriptURL.match(/https?:\/\/([^/:]+)/);
@@ -26,32 +41,37 @@ export function getDefaultServerUrl(): string {
     }
   } catch {}
 
-  // Fallback: Android Emulator uses 10.0.2.2; iOS / Web uses localhost.
+  // 3. Fallback for Android Emulator (10.0.2.2) and Web/iOS Simulator (localhost)
   return Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://localhost:4000';
 }
 
 export const DEFAULT_SERVER_URL = getDefaultServerUrl();
 
 class ApiClient {
-  private baseUrl: string = getDefaultServerUrl();
+  private customBaseUrl: string | null = null;
 
   setBaseUrl(url: string) {
-    this.baseUrl = url.replace(/\/+$/, '');
+    this.customBaseUrl = url.replace(/\/+$/, '');
   }
 
   getBaseUrl(): string {
-    return this.baseUrl;
+    if (this.customBaseUrl) {
+      return this.customBaseUrl;
+    }
+    return getDefaultServerUrl();
   }
 
   /**
-   * Submits a field report to POST /v1/reports with a 10-second AbortController watchdog.
+   * Submits a field report to POST /v1/reports with a 15-second AbortController watchdog.
+   * (The mock server injects up to 6 seconds of latency).
    */
   async submitReport(payload: ReportPayload): Promise<SubmitResult> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const targetUrl = `${this.getBaseUrl()}/v1/reports`;
 
     try {
-      const response = await fetch(`${this.baseUrl}/v1/reports`, {
+      const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -86,8 +106,7 @@ class ApiClient {
       }
 
       if (status === 409) {
-        // CRITICAL: The server already received and saved this exact client_report_id
-        // during an earlier save_then_drop or dropped connection!
+        // IDEMPOTENCY PASS: Server saved this during a previous save_then_drop!
         return {
           kind: 'conflict_resolved',
           reportId: data.report_id,
@@ -128,7 +147,7 @@ class ApiClient {
       clearTimeout(timeoutId);
       const isAbort = err.name === 'AbortError';
       const message = isAbort
-        ? 'Request timed out after 10s'
+        ? `Request timed out (target: ${targetUrl})`
         : err.message || 'Network request failed';
 
       return {
@@ -143,10 +162,11 @@ class ApiClient {
    */
   async fetchDebugCount(): Promise<ServerDebugCount> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const targetUrl = `${this.getBaseUrl()}/v1/_debug/count`;
 
     try {
-      const response = await fetch(`${this.baseUrl}/v1/_debug/count`, {
+      const response = await fetch(targetUrl, {
         method: 'GET',
         signal: controller.signal,
       });
@@ -165,7 +185,8 @@ class ApiClient {
    * Resets mock server state between test runs.
    */
   async resetServer(): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/v1/_debug/reset`, {
+    const targetUrl = `${this.getBaseUrl()}/v1/_debug/reset`;
+    const response = await fetch(targetUrl, {
       method: 'POST',
     });
     if (!response.ok) {

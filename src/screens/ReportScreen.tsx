@@ -52,7 +52,7 @@ export default function ReportScreen() {
   const [showLogs, setShowLogs] = useState(false);
 
   // --- Server Verification State ---
-  const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
+  const [serverUrl, setServerUrl] = useState(apiClient.getBaseUrl());
   const [showConfig, setShowConfig] = useState(false);
   const [debugResult, setDebugResult] = useState<ServerDebugCount | null>(null);
   const [verifyingServer, setVerifyingServer] = useState(false);
@@ -77,6 +77,10 @@ export default function ReportScreen() {
 
   // Initialize and subscribe
   useEffect(() => {
+    const detectedUrl = apiClient.getBaseUrl();
+    setServerUrl(detectedUrl);
+    apiClient.setBaseUrl(detectedUrl);
+
     loadData();
 
     // Trigger sync queue on mount
@@ -278,7 +282,9 @@ export default function ReportScreen() {
           <View style={styles.header}>
             <View>
               <Text style={styles.title}>Field Reporter</Text>
-              <Text style={styles.subtitle}>Offline-First Outbox Dispatcher</Text>
+              <Text style={styles.subtitle}>
+                Server: {apiClient.getBaseUrl()}
+              </Text>
             </View>
             <TouchableOpacity
               style={styles.configToggle}
