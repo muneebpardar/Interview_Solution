@@ -171,8 +171,8 @@ export default function ReportScreen() {
         finding: finding.trim(),
         action_needed: actionNeeded.trim(),
         captured_at,
-        lat: coords.lat,
-        lng: coords.lng,
+        lat: Number(coords.lat) || DEFAULT_COORDS.lat,
+        lng: Number(coords.lng) || DEFAULT_COORDS.lng,
       });
 
       // 3. Clear form inputs immediately

@@ -25,6 +25,11 @@ npm run mock
 # Listens on http://localhost:4000
 ```
 > **Note:** `mock-server.js` is unmodified and verified by SHA-256 hash (`f1da090727a5eb26`).
+>
+> **Wi-Fi / Physical Device Testing Note:** If testing via Expo Go on a physical phone over Wi-Fi, ensure Windows Firewall permits inbound traffic on port 4000:
+> ```powershell
+> New-NetFirewallRule -DisplayName "MockServer4000" -Direction Inbound -LocalPort 4000 -Protocol TCP -Action Allow
+> ```
 
 ### 4. Run the Automated Hostile Sync Verification Test
 To immediately prove that the sync algorithm survives all hostile server failures and achieves `duplicates_created === 0`:
@@ -37,9 +42,9 @@ This test runs 8 reports through the live mock server's deterministic chaos (`ok
 ```bash
 npm start
 ```
-- Press `a` for Android emulator (uses `http://10.0.2.2:4000` to reach host machine localhost).
-- Press `w` for Web preview.
-- Or scan the QR code with **Expo Go** on your Android device (set the server URL in the in-app `⚙ Server` drawer to your computer's local LAN IP, e.g., `http://192.168.1.X:4000`).
+- **Physical Phone (Expo Go)**: Scan the QR code. The app uses `expo-constants` to **automatically detect your computer's local Wi-Fi IP** (e.g. `http://192.168.1.X:4000`) and displays it right under the screen title.
+- **Android Emulator**: Press `a` (connects via `http://10.0.2.2:4000`).
+- **Web**: Press `w` (connects via `http://localhost:4000`).
 
 ---
 
@@ -75,27 +80,34 @@ Rather than relying on `AsyncStorage` (which serializes entire JSON blobs and ca
 
 ---
 
-### 3. Single-Flight Serial Mutex Lock & Jittered Backoff
+### 3. Single-Flight Serial Mutex Lock with Dirty-Flag Tail Check
 To avoid connection storms and race conditions over flapping 2G/3G connections:
 - **Strict Serial Execution**: A mutex lock (`isProcessing`) ensures only one HTTP request is active at any time. Reports are dispatched in FIFO order (`ORDER BY created_at ASC`).
+- **Dirty-Flag Tail Check (`rerunRequested`)**: If a field worker rapidly submits additional reports while an existing request is in-flight, a `rerunRequested` flag is marked. The dispatcher immediately loops through the outbox before relinquishing the lock, eliminating race conditions.
 - **Exponential Backoff with Full Jitter**:
   ```typescript
   backoff = Math.floor(Math.random() * Math.min(15000, 1500 * (1.8 ^ retryCount))) + 800;
   ```
 - **HTTP 429 Rate Limiting**: Explicitly honors the `Retry-After` header sent by the server.
-- **Watchdog Timeout**: A 10-second `AbortController` watchdog aborts frozen sockets to prevent queue deadlock.
+- **Watchdog Timeout**: A 15-second `AbortController` watchdog aborts frozen sockets to prevent queue deadlock while accommodating the mock server's random 6-second latency.
 - **Fatal Error Handling**: HTTP `400` and `413` errors are tagged `FAILED_FATAL` so invalid records never deadlock the queue.
 
 ---
 
-### 4. GPS & Location Strategy
+### 4. Smart Host IP Auto-Detection (`expo-constants`)
+- When testing on physical devices across local Wi-Fi, hardcoded `localhost` or `10.0.2.2` fails.
+- The app uses `Constants.expoConfig.hostUri` and `NativeModules.SourceCode.scriptURL` to automatically resolve your computer's LAN IP address (`http://192.168.1.X:4000`), displaying the active target in the app header and allowing 1-tap edits in the `⚙ Server` drawer.
+
+---
+
+### 5. GPS & Location Strategy
 Per the trial brief:
 - The app integrates `expo-location` with a simple toggle switch for device GPS.
 - If GPS permissions are denied or indoor satellite acquisition fails, it falls back seamlessly to hardcoded Karachi coordinates (`lat: 24.8607, lng: 67.0011`), ensuring the field worker is never blocked.
 
 ---
 
-### 5. In-App Telemetry & Server Verification HUD
+### 6. In-App Telemetry & Server Verification HUD
 The application includes a built-in diagnostic interface:
 - **Network Bar**: Shows real-time connectivity state with a **"Force Offline"** switch to test offline queueing without altering OS settings.
 - **Queue Metrics**: Live breakdown of `[Total | Pending | In Flight | Synced]`.
@@ -118,7 +130,12 @@ The brief explicitly requests naming the weak points of this solution. Here is a
 * **The Impact:** If a worker submits reports in the field and immediately locks their phone or switches to WhatsApp, pending retries in `WAITING_RETRY` will pause until the worker re-opens the app.
 * **Production Fix:** Implement an Android Foreground Service with a sticky notification or integrate `expo-task-manager` / Android `WorkManager` with a `PeriodicWorkRequest` configured with network constraints.
 
-### 3. Client Clock Skew on Low-End Devices
+### 3. Local Wi-Fi / Cellular NAT & Firewall Barriers
+* **The Weakness:** Mobile devices communicating with local development servers over Wi-Fi are vulnerable to host firewall drops (e.g. Windows Firewall silently dropping port 4000 packets) or router AP client isolation.
+* **The Impact:** Requests can hang or fail with `fetch request cancelled` if inbound firewall rules are missing.
+* **Production Fix:** In production, apps target public, TLS-secured endpoints (HTTPS) via CDNs or cloud load balancers, eliminating LAN-specific firewall and port-forwarding issues.
+
+### 4. Client Clock Skew on Low-End Devices
 * **The Weakness:** Field devices frequently have incorrect local system clocks (manual time set incorrectly, dead RTC battery).
 * **The Impact:** The report's `captured_at` timestamp is generated using `new Date().toISOString()`. If the phone's clock is skewed by months or years, audit timelines and FIFO sorting may be distorted.
 * **Production Fix:** Calculate a server-time offset on initial handshake (`Date.now() - Date.parse(serverResponse.headers['date'])`) and apply this offset to all locally recorded timestamps.

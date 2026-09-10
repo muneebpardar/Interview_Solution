@@ -24,14 +24,14 @@ Use this script to guide your screen recording (Loom or phone recording). It is 
   > 
   > *Notice lines 35–40 in `src/storage/db.ts`: if the Android Low Memory Killer terminates the app while a request is in-flight, our database bootstrap executes an atomic recovery query that resets `IN_FLIGHT` back to `QUEUED`.*
   > 
-  > *Let's demonstrate this live: I'll toggle 'Force Offline' in the app. Now I'll submit 3 reports. You can see all 3 entries immediately appear in the Outbox as `QUEUED`. Now I'll swipe-kill the app completely from the OS app switcher, reopen it, and as you can see, all 3 reports are still here in SQLite, ready to dispatch."*
+  > *Let's demonstrate this live: I'll toggle 'Force Offline' in the app. Notice the app automatically detected our host machine's Wi-Fi IP under the title (`Server: http://192.168.1.X:4000`). Now I'll submit 3 reports. You can see all 3 entries immediately appear in the Outbox as `QUEUED`. Now I'll swipe-kill the app completely from the OS app switcher, reopen it, and as you can see, all 3 reports are still here in SQLite, ready to dispatch."*
 
 ---
 
 ### [1:30 – 2:20] Live Sync against Hostile Server Chaos
 * **What to show on screen:** Turn offline mode off in the app, and open the "Live Log" drawer on screen, showing real-time sync logs.
 * **What to say:**
-  > *"Now let's turn the network back on. Our dispatcher acquires a serial mutex lock and starts dispatching.*
+  > *"Now let's turn the network back on. Our dispatcher acquires a serial mutex lock with a dirty-flag tail check to prevent race conditions even if the worker submits rapidly.*
   > 
   > *Look at the Live Dispatcher Stream: report #1 succeeds with `201 Created`. Report #2 hits a socket hangup from `save_then_drop`. Our dispatcher catches the drop, applies exponential backoff with full jitter, and re-submits.*
   > 
@@ -45,7 +45,8 @@ Use this script to guide your screen recording (Loom or phone recording). It is 
   > *"Let's tap 'Check Mock Server Stats'. The mock server responds directly: `VERDICT: PASS — no duplicates`, with `reports_stored: 3` and `duplicates_created: 0`.*
   > 
   > *Finally, per the brief, what in my solution am I least confident about?*
-  > 1. *Server-side memory: the mock server keeps its idempotency map in process memory. If the backend process restarted during a dropped connection, its memory would be wiped.*
+  > 1. *Server-side memory: the mock server keeps its idempotency map in process memory. If the backend process restarted during a dropped connection, its memory would be wiped. In production, idempotency keys belong in a persistent database or Redis.*
   > 2. *Aggressive Android OEM battery killers: low-end Androids like Infinix or Xiaomi kill background timers. In production, we would use an Android Foreground Service or WorkManager to drain the outbox even when the screen is locked.*
+  > 3. *Local Wi-Fi firewall and NAT barriers: in local development, host OS firewalls can drop mobile traffic, requiring inbound rules on port 4000, which in production is solved by public TLS endpoints.*
   > 
   > *Thank you, and looking forward to your thoughts!"*

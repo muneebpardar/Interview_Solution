@@ -8,6 +8,7 @@ type LogListener = (entry: SyncLogEntry) => void;
 
 class SyncDispatcher {
   private isProcessing = false;
+  private rerunRequested = false;
   private isOnline = true;
   private isSimulatedOffline = false;
   private timer: any = null;
@@ -106,12 +107,17 @@ class SyncDispatcher {
   // --- Dispatch Loop ---
 
   /**
-   * Trigger queue processing. Safe to call concurrently; protected by single-flight mutex.
+   * Trigger queue processing. Safe to call concurrently; protected by single-flight mutex
+   * with dirty-flag tail checks to ensure rapid enqueues never get missed.
    */
   notify() {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
+    }
+    if (this.isProcessing) {
+      this.rerunRequested = true;
+      return;
     }
     this.processQueue();
   }
@@ -122,6 +128,7 @@ class SyncDispatcher {
 
   private async processQueue() {
     if (this.isProcessing) {
+      this.rerunRequested = true;
       return;
     }
 
@@ -129,13 +136,16 @@ class SyncDispatcher {
     this.notifyListeners();
 
     try {
-      while (this.canDispatch()) {
-        const item = await outboxRepo.getNextPendingItem(Date.now());
-        if (!item) {
-          // No items ready now. Check if any items are scheduled for future retry.
-          await this.scheduleWakeupIfPending();
-          break;
-        }
+      do {
+        this.rerunRequested = false;
+
+        while (this.canDispatch()) {
+          const item = await outboxRepo.getNextPendingItem(Date.now());
+          if (!item) {
+            // No items ready now. Check if any items are scheduled for future retry.
+            await this.scheduleWakeupIfPending();
+            break;
+          }
 
         // Transition item to IN_FLIGHT
         await outboxRepo.markInFlight(item.client_report_id);
@@ -198,6 +208,7 @@ class SyncDispatcher {
 
         this.notifyListeners();
       }
+    } while (this.rerunRequested && this.canDispatch());
     } catch (err: any) {
       console.error('Unexpected queue processing error:', err);
     } finally {

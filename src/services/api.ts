@@ -101,7 +101,7 @@ class ApiClient {
       if (status === 201) {
         return {
           kind: 'created',
-          reportId: data.report_id,
+          reportId: data.report_id || 'srv_created',
         };
       }
 
@@ -109,7 +109,7 @@ class ApiClient {
         // IDEMPOTENCY PASS: Server saved this during a previous save_then_drop!
         return {
           kind: 'conflict_resolved',
-          reportId: data.report_id,
+          reportId: data.report_id || 'srv_idempotent_confirmed',
         };
       }
 
