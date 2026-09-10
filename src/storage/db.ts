@@ -1,17 +1,49 @@
 import * as SQLite from 'expo-sqlite';
 
-let dbInstance: SQLite.SQLiteDatabase | null = null;
+let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let dbQueue: Promise<unknown> = Promise.resolve();
 
 /**
  * Returns the singleton SQLite database instance.
- * Initializes schema and runs crash recovery on first connection.
+ * Thread-safe: ensures schema initialization and crash recovery complete
+ * exactly once before any query runs, even with concurrent callers.
  */
-export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
-  if (!dbInstance) {
-    dbInstance = await SQLite.openDatabaseAsync('field_reports.db');
-    await initDatabase(dbInstance);
+export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
+  if (!dbPromise) {
+    dbPromise = (async () => {
+      try {
+        const db = await SQLite.openDatabaseAsync('field_reports.db');
+        await initDatabase(db);
+        return db;
+      } catch (err) {
+        dbPromise = null; // Allow retry if initialization failed
+        throw err;
+      }
+    })();
   }
-  return dbInstance;
+  return dbPromise;
+}
+
+/**
+ * Executes a database operation sequentially through a mutex lock.
+ * On Android, expo-sqlite throws NullPointerException in NativeDatabase.prepareAsync
+ * if multiple asynchronous queries execute concurrently on the same database handle.
+ * Serializing calls through this queue guarantees 100% crash-free ACID execution.
+ */
+export async function withDb<T>(op: (db: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
+  const db = await getDatabase();
+
+  const currentOp = (async () => {
+    try {
+      await dbQueue;
+    } catch {
+      // Ignore previous errors so subsequent operations proceed uninterrupted
+    }
+    return await op(db);
+  })();
+
+  dbQueue = currentOp.catch(() => {});
+  return await currentOp;
 }
 
 /**

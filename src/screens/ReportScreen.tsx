@@ -59,19 +59,31 @@ export default function ReportScreen() {
 
   // Tick for retry countdowns
   const [, setTick] = useState(0);
+  const isLoadingRef = useRef(false);
+  const pendingReloadRef = useRef(false);
 
   const loadData = useCallback(async () => {
+    if (isLoadingRef.current) {
+      pendingReloadRef.current = true;
+      return;
+    }
+    isLoadingRef.current = true;
+
     try {
-      const [allRows, queueStats] = await Promise.all([
-        outboxRepo.getAll(),
-        outboxRepo.getStats(),
-      ]);
+      const allRows = await outboxRepo.getAll();
+      const queueStats = await outboxRepo.getStats();
       setItems(allRows);
       setStats(queueStats);
       setNetworkStatus(syncDispatcher.getNetworkStatus());
       setLogs(syncDispatcher.getRecentLogs());
     } catch (err) {
       console.error('Error loading outbox data:', err);
+    } finally {
+      isLoadingRef.current = false;
+      if (pendingReloadRef.current) {
+        pendingReloadRef.current = false;
+        loadData();
+      }
     }
   }, []);
 
