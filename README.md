@@ -1,7 +1,7 @@
 # 📱 Offline-First Field Reporting (React Native / Expo)
 
 > Engineered for field teams operating across Pakistan in low-connectivity markets on budget Android smartphones.  
-> Guaranteed **zero duplicate reports (`duplicates_created: 0`)** even under hostile network drops where the server saves a report and terminates the TCP socket before acknowledging (`save_then_drop`).
+> Guaranteed **zero duplicate reports (`duplicates_created: 0`)** even under hostile network drops where the server saves a report and terminates the TCP socket before acknowledging (`save_then_drop`)
 
 ---
 
